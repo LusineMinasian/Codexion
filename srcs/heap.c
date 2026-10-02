@@ -89,3 +89,70 @@ int heap_push(t_heap *h, long key, long tiebreak, int coder_id)
     sift_up(h, h->size - 1);
     return (1);
 }
+
+int heap_peek_min(t_heap *h, t_heap_node *out)
+{
+    if (h->size == 0)
+        return (0);
+    *out = h->nodes[0];
+    return (1);
+}
+
+static void	sift_down(t_heap *h, int i)
+{
+    int left;
+    int right;
+    int smallest;
+
+    while (1)
+    {
+        left = 2 * i + 1;
+        right = 2 * i + 2;
+        smallest = i;
+        if (left < h->size && node_less(&h->nodes[left], &h->nodes[smallest]))
+            smallest = left;
+        if (right < h->size && node_less(&h->nodes[right], &h->nodes[smallest]))
+            smallest = right;
+        if (smallest == i)
+            return ;
+        else
+        {
+            swap_nodes(&h->nodes[i], &h->nodes[smallest]);
+            i = smallest;
+        }
+    }
+}
+
+int heap_pop_min(t_heap *h, t_heap_node *out)
+{
+    if (h->size == 0)
+        return (0);
+    *out = h->nodes[0];
+    h->size = h->size - 1;
+    h->nodes[0] = h->nodes[h->size];
+    if (h->size > 0)
+        sift_down(h, 0);
+    return (1);
+}
+
+int	heap_remove_coder(t_heap *h, int coder_id)
+{
+    int i;
+
+    i = 0;
+    while (i < h->size && h->nodes[i].coder_id != coder_id)
+        i++;
+    if (i == h->size)
+        return (0);
+    h->size = h->size - 1;
+    h->nodes[i] = h->nodes[h->size];
+    sift_up(h, i);
+    sift_down(h, i);
+    return (1);
+}
+
+void	heap_destroy(t_heap *h)
+{
+    free(h->nodes);
+    h->nodes = NULL;
+}

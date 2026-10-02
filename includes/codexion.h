@@ -39,6 +39,11 @@ typedef struct s_heap
 }   t_heap;
 
 int parse_args(int argc, char **argv, t_sim *sim);
-int heap_init(t_heap *h);
+int		heap_init(t_heap *h);
+int		heap_push(t_heap *h, long key, long tiebreak, int coder_id);
+int		heap_pop_min(t_heap *h, t_heap_node *out);
+int		heap_peek_min(t_heap *h, t_heap_node *out);
+int		heap_remove_coder(t_heap *h, int coder_id);
+void	heap_destroy(t_heap *h);
 
 #endif
