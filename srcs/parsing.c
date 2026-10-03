@@ -89,7 +89,7 @@ int	parse_args(int argc, char **argv, t_sim *sim)
 	if (strcmp(argv[8], "fifo") == 0)
 		sim->scheduler = SCHED_FIFO;
 	else if (strcmp(argv[8], "edf") == 0)
-		sim->scheduler = SCHED_EDF;
+		sim->scheduler = SCHEDULER_EDF;
 	else
 	{
 		fprintf(stderr, "codexion: scheduler must be 'fifo' or 'edf'\n");

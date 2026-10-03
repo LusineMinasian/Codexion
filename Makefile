@@ -1,7 +1,7 @@
 NAME = codexion
 CC = cc
 CFLAGS = -Wall -Wextra -Werror -pthread -I includes
-SRCS = srcs/main.c srcs/parsing.c srcs/heap.c
+SRCS = srcs/main.c srcs/parsing.c srcs/heap.c srcs/dongle.c srcs/utils.c srcs/logger.c
 HEAD = includes/codexion.h
 OBJS = $(SRCS:.c=.o)
 
