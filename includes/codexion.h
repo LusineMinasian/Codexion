@@ -70,6 +70,7 @@ struct s_sim
     t_coder         *coders;
     int             stop;
     pthread_mutex_t stop_mutex;
+    t_coder         *coders;
 };
 
 int     parse_args(int argc, char **argv, t_sim *sim);
@@ -86,6 +87,6 @@ long    time_now_ms(t_sim *sim);
 void    log_event(t_sim *sim, int coder_id, const char *msg);
 int     dongle_acquire(t_dongle *d, t_coder *c);
 int     sim_should_stop(t_sim *sim);
-void    sim_request_stop(t_sim *sim);hhhh
+void    sim_request_stop(t_sim *sim);
 
 #endif
