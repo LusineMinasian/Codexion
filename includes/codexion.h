@@ -39,6 +39,7 @@ typedef struct s_dongle
     pthread_cond_t  cond;
     t_heap          waiters;
     t_sim	        *sim;
+    long            next_seq;
 }   t_dongle;
 
 typedef struct s_coder
@@ -67,6 +68,8 @@ struct s_sim
     struct timeval  t0;
     pthread_mutex_t log_mutex;
     t_coder         *coders;
+    int             stop;
+    pthread_mutex_t stop_mutex;
 };
 
 int     parse_args(int argc, char **argv, t_sim *sim);
@@ -76,10 +79,13 @@ int		heap_pop_min(t_heap *h, t_heap_node *out);
 int		heap_peek_min(t_heap *h, t_heap_node *out);
 int		heap_remove_coder(t_heap *h, int coder_id);
 void	heap_destroy(t_heap *h);
-void	dongle_release(t_dongle *d);
+void    dongle_release(t_dongle *d);
 int     dongles_init(t_sim *sim);
 void    dongles_destroy(t_sim *sim);
 long    time_now_ms(t_sim *sim);
 void    log_event(t_sim *sim, int coder_id, const char *msg);
+int     dongle_acquire(t_dongle *d, t_coder *c);
+int     sim_should_stop(t_sim *sim);
+void    sim_request_stop(t_sim *sim);hhhh
 
 #endif
