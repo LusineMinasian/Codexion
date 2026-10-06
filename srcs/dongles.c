@@ -1,114 +1,112 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   dongles.c                                          :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: lminasia <lminasia@student.42.fr>          +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2026/10/06 15:43:48 by lminasia          #+#    #+#             */
+/*   Updated: 2026/10/06 15:43:48 by lminasia         ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
 #include "codexion.h"
 
-int	dongles_init(t_sim *sim)
+/*
+** Both dongles get the same (key, ticket) from one global counter, so all
+** queues share a single order: the best-ranked waiter is first in line for
+** both of its dongles, and two coders can never block each other.
+*/
+static long	request_key(t_coder *c, long *ticket)
 {
-    int i;
+	t_sim	*sim;
+	long	key;
 
-    sim->dongles = malloc(sizeof(t_dongle) * sim->number_of_coders);
-    if (!sim->dongles)
-    {
-        fprintf(stderr, "codexion: error\n");
-        return (0);
-    }
-    i = 0;
-    while (i < sim->number_of_coders)
-    {
-        sim->dongles[i].id = i;
-        sim->dongles[i].taken = 0;
-        sim->dongles[i].available_at = 0;
-        sim->dongles[i].sim = sim;
-        sim->dongles[i].sim = 0;
-        pthread_mutex_init(&sim->dongles[i].mutex, NULL);
-        pthread_cond_init(&sim->dongles[i].cond, NULL);
-        heap_init(&sim->dongles[i].waiters);
-        i++;
-    }
-    return (1);
+	sim = c->sim;
+	pthread_mutex_lock(&sim->ticket_mutex);
+	*ticket = sim->next_ticket;
+	sim->next_ticket = *ticket + 1;
+	pthread_mutex_unlock(&sim->ticket_mutex);
+	if (sim->scheduler == SCHEDULER_FIFO)
+		return (*ticket);
+	pthread_mutex_lock(&c->mutex);
+	key = c->last_compile_start + sim->time_to_burnout;
+	pthread_mutex_unlock(&c->mutex);
+	return (key);
 }
 
-void dongles_destroy(t_sim *sim)
+static int	pair_enqueue(t_dongle *a, t_dongle *b, t_coder *c)
 {
-    int i;
+	long	ticket;
+	long	key;
+	int		ok;
 
-    i = 0;
-    while (i < sim->number_of_coders)
-    {
-        pthread_mutex_destroy(&sim->dongles[i].mutex);
-        pthread_cond_destroy(&sim->dongles[i].cond);
-        heap_destroy(&sim->dongles[i].waiters);
-        i++;
-    }
-    free(sim->dongles);
-    sim->dongles = NULL;
+	key = request_key(c, &ticket);
+	pthread_mutex_lock(&a->mutex);
+	pthread_mutex_lock(&b->mutex);
+	ok = heap_push(&a->waiters, key, ticket, c->id);
+	if (ok && !heap_push(&b->waiters, key, ticket, c->id))
+	{
+		heap_remove_coder(&a->waiters, c->id);
+		ok = 0;
+	}
+	pthread_mutex_unlock(&b->mutex);
+	pthread_mutex_unlock(&a->mutex);
+	return (ok);
 }
 
-void    dongle_release(t_dongle *d)
+/* Called with both mutexes held: free, cooled down, and first in line. */
+static int	pair_ready(t_dongle *a, t_dongle *b, int coder_id)
 {
-    pthread_mutex_lock(&d->mutex);
-    d->taken = 0;
-    d->available_at = time_now_ms(d->sim) + d->sim->dongle_cooldown;
-    pthread_cond_broadcast(&d->cond);
-    pthread_mutex_unlock(&d->mutex);
+	t_heap_node	top_a;
+	t_heap_node	top_b;
+	long		now;
+
+	now = time_now_ms(a->sim);
+	return (!a->taken && !b->taken
+		&& now >= a->available_at && now >= b->available_at
+		&& heap_peek_min(&a->waiters, &top_a) && top_a.coder_id == coder_id
+		&& heap_peek_min(&b->waiters, &top_b) && top_b.coder_id == coder_id);
 }
 
-static void ms_to_timespec(t_sim *sim, long ms, struct timespec *ts)
+/* Called with both mutexes held: leaves both queues and unlocks. */
+static int	pair_cancel(t_dongle *a, t_dongle *b, int coder_id)
 {
-    long    usec;
-
-    usec = sim->t0.tv_usec + (ms % 1000) * 1000;
-    ts->tv_sec = sim->t0.tv_sec + ms / 1000;
-    ts->tv_nsec = usec * 1000;
-    if (ts->tv_nsec >= 1000000000)
-    {
-        ts->tv_sec = ts->tv_sec + 1;
-        ts->tv_nsec = ts->tv_nsec - 1000000000;
-    }
+	heap_remove_coder(&a->waiters, coder_id);
+	heap_remove_coder(&b->waiters, coder_id);
+	pthread_mutex_unlock(&b->mutex);
+	pthread_mutex_unlock(&a->mutex);
+	return (0);
 }
 
-int	dongle_acquire(t_dongle *d, t_coder *c)
+/*
+** Takes dongles a and b (a->id < b->id) together, never just one, so a
+** coder never holds a dongle while waiting for the other. Changes to b do
+** not signal a->cond, so the wait is capped at 1 ms and then re-checked.
+*/
+int	dongles_take(t_dongle *a, t_dongle *b, t_coder *c)
 {
-	long		    deadline;
-	long			seq;
-	long			key;
 	t_heap_node		top;
 	struct timespec	ts;
 
-	pthread_mutex_lock(&c->mutex);
-	deadline = c->last_compile_start + d->sim->time_to_burnout;
-	pthread_mutex_unlock(&c->mutex);
-	pthread_mutex_lock(&d->mutex);
-	seq = d->next_seq;
-	d->next_seq = d->next_seq + 1;
-	if (d->sim->scheduler == SCHEDULER_FIFO)
-		key = seq;
-	else
-		key = deadline;
-	if (!heap_push(&d->waiters, key, seq, c->id))
-	{
-		pthread_mutex_unlock(&d->mutex);
+	if (!pair_enqueue(a, b, c))
 		return (0);
-	}
-	while (1)
+	pthread_mutex_lock(&a->mutex);
+	pthread_mutex_lock(&b->mutex);
+	while (!pair_ready(a, b, c->id))
 	{
-		if (sim_should_stop(d->sim))
-		{
-			heap_remove_coder(&d->waiters, c->id);
-			pthread_mutex_unlock(&d->mutex);
-			return (0);
-		}
-		if (!d->taken && heap_peek_min(&d->waiters, &top)
-			&& top.coder_id == c->id)
-		{
-			if (time_now_ms(d->sim) >= d->available_at)
-				break ;
-			ms_to_timespec(d->sim, d->available_at, &ts);
-			pthread_cond_timedwait(&d->cond, &d->mutex, &ts);
-		}
-		else
-			pthread_cond_wait(&d->cond, &d->mutex);
+		if (sim_should_stop(c->sim))
+			return (pair_cancel(a, b, c->id));
+		pthread_mutex_unlock(&b->mutex);
+		ms_to_timespec(c->sim, time_now_ms(c->sim) + 1, &ts);
+		pthread_cond_timedwait(&a->cond, &a->mutex, &ts);
+		pthread_mutex_lock(&b->mutex);
 	}
-	heap_pop_min(&d->waiters, &top);
-	d->taken = 1;
-	pthread_mutex_unlock(&d->mutex);
+	heap_pop_min(&a->waiters, &top);
+	heap_pop_min(&b->waiters, &top);
+	a->taken = 1;
+	b->taken = 1;
+	pthread_mutex_unlock(&b->mutex);
+	pthread_mutex_unlock(&a->mutex);
 	return (1);
 }
